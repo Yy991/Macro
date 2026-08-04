@@ -76,6 +76,10 @@ THEMES = {
         "bg": "#0d1b1a", "panel": "#14302d", "btn": "#1c3b38",
         "fg": "#eafbf9", "muted": "#7fbdb4", "border": "#06201d",
     },
+    "minecraft": {
+        "bg": "#3b2a17", "panel": "#6b4a28", "btn": "#4f3820",
+        "fg": "#efe3c0", "muted": "#b7a175", "border": "#241809",
+    },
 }
 
 DEFAULT_THEME = "dark"
@@ -630,6 +634,12 @@ class App:
         header = tk.Frame(tab, padx=16, pady=12)
         header._role = "panel"
         header.grid(row=0, column=0, sticky="ew")
+        self.header = header
+        self.header_tile = tk.Label(header)
+        self.header_tile._role = "panel"
+        self.header_tile.place(x=0, y=0, relwidth=1, relheight=1)
+        self.header_tile.lower()
+        self._tile_img = None
         self.header_badge = self._make_theme_image(header, THEME_BADGES.get("miku"), 44)
         if self.header_badge is not None:
             self.header_badge.pack(side="left", padx=(0, 12))
@@ -790,6 +800,14 @@ class App:
             img = img.subsample(scale, scale)
         return img
 
+    def _tile_image(self, src, w, h):
+        t = tk.PhotoImage(width=max(1, w), height=max(1, h))
+        sw, sh = src.width(), src.height()
+        for y in range(0, h, sh):
+            for x in range(0, w, sw):
+                t.tk.call(t, "copy", src, "-from", 0, 0, sw, sh, "-to", x, y)
+        return t
+
     def _make_theme_image(self, parent, filename, max_w):
         if not filename:
             return None
@@ -896,6 +914,22 @@ class App:
                     self.header_badge.pack_forget()
             except tk.TclError:
                 pass
+        if self.header_tile is not None:
+            if self.theme == "minecraft":
+                try:
+                    self.root.update_idletasks()
+                    w = self.header.winfo_reqwidth()
+                    h = self.header.winfo_reqheight()
+                    src = self._load_theme_image(resource_path("dirt_block.png"))
+                    if src is not None:
+                        self._tile_img = self._tile_image(src, w, h)
+                        self.header_tile.configure(image=self._tile_img)
+                        self.header_tile.place(x=0, y=0, relwidth=1, relheight=1)
+                        self.header_tile.lower()
+                except Exception:
+                    pass
+            else:
+                self.header_tile.place_forget()
         if save:
             self.save_config()
 

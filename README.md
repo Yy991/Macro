@@ -21,7 +21,8 @@ A mouse & keyboard macro recorder with a themeable GUI, in two tabs:
 - Toggle with the hotkey (default `F6`).
 
 The whole app uses a dark-themed GUI with themes: dark, light, galaxy, miku,
-and a fully custom theme editor (HSV color wheel + per-role colors).
+**minecraft** (the header turns into a tiled Minecraft dirt block), and a fully
+custom theme editor (HSV color wheel + per-role colors).
 
 ## Controls / hotkeys
 
@@ -48,8 +49,8 @@ No install needed — it's a standalone Windows program.
 
 > The full source code is included in this repo as **`FeatherMacro.txt`**
 > if you want to read (or rebuild from) it. It needs `img_MIKU_us.png` and
-> `noFilter.png` (also included) for the miku theme. The exe is the
-> ready-to-run version.
+> `noFilter.png` (miku theme) and `dirt_block.png` (minecraft theme) — all
+> included. The exe is the ready-to-run version.
 
 ## Requirements (to run the exe)
 
