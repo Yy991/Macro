@@ -24,6 +24,8 @@ A mouse & keyboard macro recorder with a themeable GUI.
 | `F9` | Toggle looping playback |
 | `ESC` | Quit |
 
+The hotkeys are **editable** — open **Settings → HOTKEYS**, click a key button,
+then press the new key. Changes are saved to `macro_config.json`.
 Hotkeys are not recorded into the macro itself.
 
 ## Run it (Windows)
