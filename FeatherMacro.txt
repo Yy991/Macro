@@ -281,6 +281,7 @@ class Recorder:
         self.hotkeys.update(cfg.get("hotkeys", {}) or {})
         self.capture_target = None   # hotkey role currently awaiting a key press
         self.on_capture = None       # callback(role, name) for UI updates
+        self.speed = float(cfg.get("speed", 1.0))   # playback speed multiplier
         # auto clicker state
         self.clicking = False
         self.click_stop = threading.Event()
@@ -433,6 +434,9 @@ class Recorder:
     def set_cps(self, cps):
         self.cps = max(1, min(100, int(cps)))
 
+    def set_speed(self, speed):
+        self.speed = max(0.1, min(5.0, float(speed)))
+
     def toggle_autoclick(self):
         with self.lock:
             if self.clicking:
@@ -515,7 +519,7 @@ class Recorder:
                 for ev in self.events:
                     if self.stop_play.is_set():
                         break
-                    wait = ev["t"] - prev
+                    wait = (ev["t"] - prev) / max(0.1, self.speed)
                     prev = ev["t"]
                     if wait > 0:
                         self._sleep(wait)
@@ -662,10 +666,25 @@ class App:
         btns.grid_columnconfigure(0, weight=1)
         btns.grid_columnconfigure(1, weight=1)
 
+        # playback speed
+        speed_row = tk.Frame(tab)
+        speed_row._role = "panel"
+        speed_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 12))
+        self._label(speed_row, "Playback speed", ("Segoe UI", 10), "panel_fg").pack(side="left", padx=(0, 12))
+        self.speed_var = tk.DoubleVar(value=self.rec.speed)
+        speed_scale = tk.Scale(speed_row, from_=0.1, to=5.0, resolution=0.1,
+                               orient="horizontal", variable=self.speed_var,
+                               showvalue=False, command=self._speed_changed)
+        speed_scale._role = "scale"
+        speed_scale.pack(side="left", fill="x", expand=True)
+        self.speed_label = self._label(speed_row, "%.1fx" % self.rec.speed,
+                                       ("Segoe UI", 10, "bold"), "panel_fg")
+        self.speed_label.pack(side="left", padx=(12, 0))
+
         # stats
         stats = tk.Frame(tab, padx=16, pady=12)
         stats._role = "panel"
-        stats.grid(row=3, column=0, sticky="ew", padx=16, pady=12)
+        stats.grid(row=4, column=0, sticky="ew", padx=16, pady=12)
         self._stat(stats, 0, "EVENTS", self.events_var)
         self._stat(stats, 1, "LOOPS", self.loops_var)
         self._stat(stats, 2, "MOUSE START", self.pos_var)
@@ -675,7 +694,7 @@ class App:
         # settings / quit
         bottom = tk.Frame(tab, padx=16)
         bottom._role = "bg"
-        bottom.grid(row=4, column=0, sticky="ew")
+        bottom.grid(row=5, column=0, sticky="ew")
         self._button(bottom, "Settings", self.open_settings, "btn").grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.quit_btn = self._button(bottom, "Quit  (%s)" % hotkey_display(self.rec.hotkeys["quit"]), self.rec.request_quit, "btn_red")
         self.quit_btn.grid(row=0, column=1, sticky="ew", padx=(8, 0))
@@ -684,7 +703,7 @@ class App:
 
         # footer
         self._label(tab, "Macro: %s    Config: %s" % (os.path.basename(MACRO_FILE), os.path.basename(CONFIG_FILE)),
-                    ("Segoe UI", 8), "bg_muted").grid(row=5, column=0, pady=(8, 10))
+                    ("Segoe UI", 8), "bg_muted").grid(row=6, column=0, pady=(8, 10))
 
     def _build_auto_tab(self, tab):
         tab.grid_columnconfigure(0, weight=1)
@@ -766,6 +785,10 @@ class App:
 
     def _click_button_changed(self, value):
         self.rec.click_button = value
+
+    def _speed_changed(self, value):
+        self.rec.set_speed(float(value))
+        self.speed_label.config(text="%.1fx" % self.rec.speed)
 
     def _click_mode_changed(self):
         self.rec.click_hold = (self.click_mode_var.get() == "hold")
@@ -901,7 +924,7 @@ class App:
 
     def save_config(self):
         save_config({"theme": self.theme, "custom": self.custom,
-                     "hotkeys": self.rec.hotkeys})
+                     "hotkeys": self.rec.hotkeys, "speed": self.rec.speed})
 
     def refresh_hotkey_labels(self):
         self.record_btn.config(text="Record  (%s)" % hotkey_display(self.rec.hotkeys["record"]))

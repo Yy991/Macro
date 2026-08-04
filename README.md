@@ -12,6 +12,8 @@ A mouse & keyboard macro recorder with a themeable GUI, in two tabs:
 **Macro tab**
 - Records mouse clicks, mouse movement, and keyboard input.
 - Plays the macro back on a **loop** until you stop it.
+- Adjustable **playback speed** (0.1x–5x slider) — slow down or speed up the
+  playback without re-recording.
 - Captures where the mouse was when recording started, and returns the cursor
   there at the start of every loop.
 
