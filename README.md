@@ -1,4 +1,4 @@
-# MacroRecorder
+# Feather Macro
 
 > **WARNING:** This tool records and replays mouse/keyboard input. Using
 > macros or auto-clickers in games (e.g. Roblox) can violate the game's
@@ -33,12 +33,12 @@ Hotkeys are not recorded into the macro itself.
 Just download and double-click:
 
 ```
-MacroRecorder.exe
+FeatherMacro.exe
 ```
 
 No install needed — it's a standalone Windows program.
 
-> The full source code is included in this repo as **`MacroRecorder.txt`**
+> The full source code is included in this repo as **`FeatherMacro.txt`**
 > if you want to read (or rebuild from) it. It needs `img_MIKU_us.png` and
 > `noFilter.png` (also included) for the miku theme. The exe is the
 > ready-to-run version.
