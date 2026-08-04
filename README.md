@@ -36,8 +36,10 @@ MacroRecorder.exe
 
 No install needed — it's a standalone Windows program.
 
-> The source code (`.py`) is intentionally not included in this repo.
-> It ships as a prebuilt exe only.
+> The full source code is included in this repo as **`MacroRecorder.txt`**
+> if you want to read (or rebuild from) it. It needs `img_MIKU_us.png` and
+> `noFilter.png` (also included) for the miku theme. The exe is the
+> ready-to-run version.
 
 ## Requirements (to run the exe)
 
