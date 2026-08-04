@@ -1,19 +1,21 @@
 """Macro Recorder - records mouse (clicks + movement) and keyboard, then plays
 them back in a loop. Ships as a small desktop app with a UI.
 
-Hotkeys (also clickable):
+Hotkeys (also clickable, editable in Settings -> HOTKEYS):
   F8 / Record   start / stop recording
   F9 / Play     start / stop looping playback
   ESC / Quit    exit
 
-Settings (UI theme) are saved to/loaded from "macro_config.json" in this
-folder. The macro itself is saved to "macro.json".
-F8/F9/ESC are not recorded so playback can't re-trigger the recorder.
+Settings (UI theme + hotkeys) are saved to/loaded from "macro_config.json" in
+this folder. The macro itself is saved to "macro.json".
+The configured hotkeys are not recorded so playback can't re-trigger the
+recorder.
 """
 import colorsys
 import json
 import math
 import os
+import queue
 import sys
 import time
 import threading
@@ -35,6 +37,17 @@ def resource_path(name):
     return os.path.join(base, name)
 
 HOTKEYS = {"f8", "f9", "esc"}
+
+DEFAULT_HOTKEYS = {"record": "f8", "play": "f9", "quit": "esc"}
+
+
+def hotkey_display(name):
+    name = str(name)
+    if name.startswith("char:"):
+        return name[len("char:"):].upper()
+    if name.startswith("vk:"):
+        return name[len("vk:"):].upper()
+    return name.upper()
 
 MOVE_THRESHOLD = 4      # min pixels of movement to record
 MOVE_MIN_TIME = 0.1     # min seconds between recorded movement samples
@@ -248,7 +261,7 @@ def key_from_name(name):
 
 
 class Recorder:
-    def __init__(self):
+    def __init__(self, hotkeys=None):
         self.recording = False
         self.playing = False
         self.events = []          # list of dicts: t, type, action, ...
@@ -260,8 +273,13 @@ class Recorder:
         self.last_move_t = 0.0
         self.start_pos = None       # mouse position when recording started
         self.loops = 0              # completed playback loops
-        self.message = "Ready. Click Record or press F8."
+        self.message = "Ready. Click Record or press %s." % hotkey_display(DEFAULT_HOTKEYS["record"])
         self.quit_requested = False
+        cfg = load_config()
+        self.hotkeys = dict(DEFAULT_HOTKEYS)
+        self.hotkeys.update(cfg.get("hotkeys", {}) or {})
+        self.capture_target = None   # hotkey role currently awaiting a key press
+        self.on_capture = None       # callback(role, name) for UI updates
 
     # -- recording --------------------------------------------------------------
     def _record(self, ev):
@@ -299,21 +317,44 @@ class Recorder:
             return str(key)
 
     # -- hotkeys ----------------------------------------------------------------
+    def _capture_hotkey(self, name):
+        target = self.capture_target
+        self.capture_target = None
+        if not name:
+            if self.on_capture:
+                self.on_capture(target, self.hotkeys.get(target))
+            return
+        for other, val in self.hotkeys.items():
+            if other != target and val == name:
+                self.message = "%s is already assigned to %s. Pick another key." % (
+                    hotkey_display(name), other.capitalize())
+                if self.on_capture:
+                    self.on_capture(target, self.hotkeys.get(target))
+                return
+        self.hotkeys[target] = name
+        self.message = "%s set as the %s hotkey." % (
+            hotkey_display(name), target.capitalize())
+        if self.on_capture:
+            self.on_capture(target, name)
+
     def on_press(self, key):
         name = self._key_name(key)
-        if name == "esc":
+        if self.capture_target is not None:
+            self._capture_hotkey(name)
+            return
+        if name == self.hotkeys.get("quit"):
             self.quit_requested = True
             self.message = "Quitting..."
             self.stop_play.set()
             return False  # stop listeners
-        if name == "f8":
+        if name == self.hotkeys.get("record"):
             self.toggle_record()
             return
-        if name == "f9":
+        if name == self.hotkeys.get("play"):
             self.toggle_play()
             return
         # everything else gets recorded
-        if name in HOTKEYS:
+        if name in self.hotkeys.values():
             return
         if key in self.held_keys:
             return
@@ -322,7 +363,9 @@ class Recorder:
 
     def on_release(self, key):
         name = self._key_name(key)
-        if name in HOTKEYS:
+        if self.capture_target is not None:
+            return
+        if name in self.hotkeys.values():
             return
         if key not in self.held_keys:
             return
@@ -333,7 +376,7 @@ class Recorder:
     def toggle_record(self):
         with self.lock:
             if self.playing:
-                self.message = "Press Play (F9) to stop playback first."
+                self.message = "Press %s (Play) to stop playback first." % hotkey_display(self.hotkeys["play"])
                 return
             if self.recording:
                 self.recording = False
@@ -347,7 +390,7 @@ class Recorder:
                 self.start_pos = list(mouse.Controller().position)
                 self.start_t = time.time()
                 self.recording = True
-                self.message = "Recording... press F8 / Stop when done."
+                self.message = "Recording... press %s / Stop when done." % hotkey_display(self.hotkeys["record"])
 
     def toggle_play(self):
         with self.lock:
@@ -365,7 +408,8 @@ class Recorder:
             self.stop_play = threading.Event()
             self.loops = 0
             self.playing = True
-            self.message = "Playing %d events (looping)... F9 to stop." % len(self.events)
+            self.message = "Playing %d events (looping)... %s to stop." % (
+                len(self.events), hotkey_display(self.hotkeys["play"]))
         threading.Thread(target=self._play, daemon=True).start()
 
     def request_quit(self):
@@ -464,6 +508,7 @@ class App:
         self.valbar = None
         self.header_img = None
         self.header_badge = None
+        self.capture_queue = queue.Queue()
 
         cfg = load_config()
         self.theme = cfg.get("theme", DEFAULT_THEME)
@@ -531,9 +576,9 @@ class App:
         btns = tk.Frame(r, padx=16)
         btns._role = "bg"
         btns.grid(row=2, column=0, sticky="ew")
-        self.record_btn = self._button(btns, "Record  (F8)", self.rec.toggle_record, "btn_accent")
+        self.record_btn = self._button(btns, "Record  (%s)" % hotkey_display(self.rec.hotkeys["record"]), self.rec.toggle_record, "btn_accent")
         self.record_btn.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.play_btn = self._button(btns, "Play  (F9)", self.rec.toggle_play, "btn_green")
+        self.play_btn = self._button(btns, "Play  (%s)" % hotkey_display(self.rec.hotkeys["play"]), self.rec.toggle_play, "btn_green")
         self.play_btn.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         btns.grid_columnconfigure(0, weight=1)
         btns.grid_columnconfigure(1, weight=1)
@@ -553,7 +598,8 @@ class App:
         bottom._role = "bg"
         bottom.grid(row=4, column=0, sticky="ew")
         self._button(bottom, "Settings", self.open_settings, "btn").grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self._button(bottom, "Quit  (ESC)", self.rec.request_quit, "btn_red").grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.quit_btn = self._button(bottom, "Quit  (%s)" % hotkey_display(self.rec.hotkeys["quit"]), self.rec.request_quit, "btn_red")
+        self.quit_btn.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         bottom.grid_columnconfigure(0, weight=1)
         bottom.grid_columnconfigure(1, weight=1)
 
@@ -679,7 +725,13 @@ class App:
             self.save_config()
 
     def save_config(self):
-        save_config({"theme": self.theme, "custom": self.custom})
+        save_config({"theme": self.theme, "custom": self.custom,
+                     "hotkeys": self.rec.hotkeys})
+
+    def refresh_hotkey_labels(self):
+        self.record_btn.config(text="Record  (%s)" % hotkey_display(self.rec.hotkeys["record"]))
+        self.play_btn.config(text="Play  (%s)" % hotkey_display(self.rec.hotkeys["play"]))
+        self.quit_btn.config(text="Quit  (%s)" % hotkey_display(self.rec.hotkeys["quit"]))
 
     def choose_theme(self, name):
         self.theme = name
@@ -811,7 +863,30 @@ class App:
 
         self.role_var.trace_add("write", self._role_changed)
 
+        # hotkey editor
+        self._label(win, "HOTKEYS", ("Segoe UI", 12, "bold"), "panel_fg").pack(anchor="w", padx=14, pady=(12, 4))
+        hk_frame = tk.Frame(win)
+        hk_frame._role = "bg"
+        hk_frame.pack(fill="x", padx=14)
+        self.hk_buttons = {}
+        for role, label in (("record", "Record"), ("play", "Play"), ("quit", "Quit")):
+            row = tk.Frame(hk_frame)
+            row._role = "bg"
+            row.pack(fill="x", pady=2)
+            self._label(row, label, ("Segoe UI", 10), "bg_fg").pack(side="left", padx=(0, 12))
+            btn = tk.Button(row, text=hotkey_display(self.rec.hotkeys[role]),
+                            command=lambda r=role: self.arm_hotkey(r),
+                            relief="flat", bd=0, padx=10, pady=4,
+                            font=("Segoe UI", 10, "bold"), cursor="hand2")
+            btn._role = "btn"
+            btn.pack(side="left")
+            self.hk_buttons[role] = btn
+        self.hk_hint = self._label(win, "Click a key button, then press the new key.",
+                                   ("Segoe UI", 8), "bg_muted")
+        self.hk_hint.pack(anchor="w", padx=14, pady=(4, 0))
+
         def close():
+            self.rec.capture_target = None
             win.destroy()
             self.settings = None
             self.editor = None
@@ -820,6 +895,8 @@ class App:
             self.theme_var = None
             self.role_var = None
             self.hex_var = None
+            self.hk_buttons = {}
+            self.hk_hint = None
 
         self._button(win, "Close", close, "btn").pack(fill="x", padx=14, pady=(8, 12))
         self.apply_theme()
@@ -827,9 +904,38 @@ class App:
             self.editor.pack(fill="x", padx=14, pady=(4, 0))
         self.refresh_editor()
 
+    # -- hotkey editing ---------------------------------------------------------
+    def arm_hotkey(self, role):
+        self.rec.capture_target = role
+        self.rec.message = "Press the new %s hotkey..." % role
+        for r, b in getattr(self, "hk_buttons", {}).items():
+            b.config(text="Press a key..." if r == role
+                     else hotkey_display(self.rec.hotkeys[r]))
+        if getattr(self, "hk_hint", None) is not None:
+            self.hk_hint.config(text="Press the key to use for %s..." % role)
+
+    def _hotkey_captured(self, role, name):
+        self.save_config()
+        if getattr(self, "hk_buttons", None):
+            for r, b in self.hk_buttons.items():
+                b.config(text=hotkey_display(self.rec.hotkeys[r]))
+        if getattr(self, "hk_hint", None) is not None:
+            if self.rec.hotkeys.get(role) == name:
+                self.hk_hint.config(text="%s set as the %s hotkey." % (
+                    hotkey_display(name), role.capitalize()))
+            else:
+                self.hk_hint.config(text="%s is already used by another hotkey." % hotkey_display(name))
+        self.refresh_hotkey_labels()
+
     # -- polling ----------------------------------------------------------------
     def poll(self):
         rec = self.rec
+        try:
+            while True:
+                role, name = self.capture_queue.get_nowait()
+                self._hotkey_captured(role, name)
+        except queue.Empty:
+            pass
         if rec.quit_requested:
             self.root.destroy()
             return
@@ -851,6 +957,7 @@ def main():
     rec = Recorder()
     root = tk.Tk()
     app = App(root, rec)
+    rec.on_capture = lambda role, name: app.capture_queue.put((role, name))
 
     m_listener = mouse.Listener(on_click=rec.on_click, on_move=rec.on_move)
     k_listener = keyboard.Listener(on_press=rec.on_press, on_release=rec.on_release)
