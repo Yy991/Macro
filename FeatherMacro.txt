@@ -2,9 +2,10 @@
 them back in a loop. Ships as a small desktop app with a UI.
 
 Hotkeys (also clickable, editable in Settings -> HOTKEYS):
-  F8 / Record   start / stop recording
-  F9 / Play     start / stop looping playback
-  ESC / Quit    exit
+  F8 / Record      start / stop recording
+  F9 / Play        start / stop looping playback
+  F6 / Auto Click  start / stop the auto clicker
+  ESC / Quit       exit
 
 Settings (UI theme + hotkeys) are saved to/loaded from "macro_config.json" in
 this folder. The macro itself is saved to "macro.json".
@@ -38,7 +39,7 @@ def resource_path(name):
 
 HOTKEYS = {"f8", "f9", "esc"}
 
-DEFAULT_HOTKEYS = {"record": "f8", "play": "f9", "quit": "esc"}
+DEFAULT_HOTKEYS = {"record": "f8", "play": "f9", "quit": "esc", "autoclick": "f6"}
 
 
 def hotkey_display(name):
@@ -280,6 +281,12 @@ class Recorder:
         self.hotkeys.update(cfg.get("hotkeys", {}) or {})
         self.capture_target = None   # hotkey role currently awaiting a key press
         self.on_capture = None       # callback(role, name) for UI updates
+        # auto clicker state
+        self.clicking = False
+        self.click_stop = threading.Event()
+        self.cps = 10
+        self.click_button = "left"
+        self.click_hold = False
 
     # -- recording --------------------------------------------------------------
     def _record(self, ev):
@@ -346,12 +353,16 @@ class Recorder:
             self.quit_requested = True
             self.message = "Quitting..."
             self.stop_play.set()
+            self.click_stop.set()
             return False  # stop listeners
         if name == self.hotkeys.get("record"):
             self.toggle_record()
             return
         if name == self.hotkeys.get("play"):
             self.toggle_play()
+            return
+        if name == self.hotkeys.get("autoclick"):
+            self.toggle_autoclick()
             return
         # everything else gets recorded
         if name in self.hotkeys.values():
@@ -416,6 +427,51 @@ class Recorder:
         self.quit_requested = True
         self.message = "Quitting..."
         self.stop_play.set()
+        self.click_stop.set()
+
+    # -- auto clicker -----------------------------------------------------------
+    def set_cps(self, cps):
+        self.cps = max(1, min(100, int(cps)))
+
+    def toggle_autoclick(self):
+        with self.lock:
+            if self.clicking:
+                self.click_stop.set()
+                self.message = "Stopping auto clicker..."
+                return
+            if self.recording or self.playing:
+                self.message = "Stop recording / playback before auto clicking."
+                return
+            self.click_stop = threading.Event()
+            self.clicking = True
+            self.message = "Auto clicking %s at %d CPS... %s to stop." % (
+                self.click_button, self.cps,
+                hotkey_display(self.hotkeys["autoclick"]))
+        threading.Thread(target=self._click_loop, daemon=True).start()
+
+    def _click_loop(self):
+        mctl = mouse.Controller()
+        btn = self.decode_button({"button": self.click_button})
+        interval = 1.0 / max(1, self.cps)
+        try:
+            if self.click_hold:
+                mctl.press(btn)
+                while not self.click_stop.is_set():
+                    time.sleep(0.05)
+            else:
+                while not self.click_stop.is_set():
+                    mctl.click(btn)
+                    self._sleep(interval)
+        except Exception as e:
+            self.message = "Auto click error: %s" % e
+        finally:
+            try:
+                mctl.release(btn)
+            except Exception:
+                pass
+            with self.lock:
+                self.clicking = False
+            self.message = "Auto clicker stopped."
 
     # -- save / load ------------------------------------------------------------
     def save(self):
@@ -546,9 +602,32 @@ class App:
     def _build(self):
         r = self.root
         r.grid_columnconfigure(0, weight=1)
+        r.grid_rowconfigure(1, weight=1)
 
+        # tab bar
+        tabbar = tk.Frame(r)
+        tabbar._role = "bg"
+        tabbar.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 0))
+        self.tab_macro = self._button(tabbar, "Macro", lambda: self.show_tab("macro"), "tab_sel")
+        self.tab_macro.pack(side="left", padx=(0, 6))
+        self.tab_auto = self._button(tabbar, "Auto Clicker", lambda: self.show_tab("auto"), "tab")
+        self.tab_auto.pack(side="left")
+
+        # tab content frames
+        self.macro_tab = tk.Frame(r)
+        self.macro_tab._role = "bg"
+        self.macro_tab.grid(row=1, column=0, sticky="nsew")
+        self.auto_tab = tk.Frame(r)
+        self.auto_tab._role = "bg"
+        self.auto_tab.grid(row=1, column=0, sticky="nsew")
+
+        self._build_macro_tab(self.macro_tab)
+        self._build_auto_tab(self.auto_tab)
+        self.show_tab("macro")
+
+    def _build_macro_tab(self, tab):
         # header
-        header = tk.Frame(r, padx=16, pady=12)
+        header = tk.Frame(tab, padx=16, pady=12)
         header._role = "panel"
         header.grid(row=0, column=0, sticky="ew")
         self.header_badge = self._make_theme_image(header, THEME_BADGES.get("miku"), 44)
@@ -564,7 +643,7 @@ class App:
             self.header_img.pack(side="right", padx=(16, 0))
 
         # status
-        status = tk.Frame(r, padx=16, pady=12)
+        status = tk.Frame(tab, padx=16, pady=12)
         status._role = "bg"
         status.grid(row=1, column=0, sticky="ew")
         self.status_label = self._label(status, "", ("Segoe UI", 20, "bold"), "status")
@@ -573,7 +652,7 @@ class App:
         self.message_label.pack(anchor="w", pady=(6, 0))
 
         # record / play
-        btns = tk.Frame(r, padx=16)
+        btns = tk.Frame(tab, padx=16)
         btns._role = "bg"
         btns.grid(row=2, column=0, sticky="ew")
         self.record_btn = self._button(btns, "Record  (%s)" % hotkey_display(self.rec.hotkeys["record"]), self.rec.toggle_record, "btn_accent")
@@ -584,7 +663,7 @@ class App:
         btns.grid_columnconfigure(1, weight=1)
 
         # stats
-        stats = tk.Frame(r, padx=16, pady=12)
+        stats = tk.Frame(tab, padx=16, pady=12)
         stats._role = "panel"
         stats.grid(row=3, column=0, sticky="ew", padx=16, pady=12)
         self._stat(stats, 0, "EVENTS", self.events_var)
@@ -594,7 +673,7 @@ class App:
             stats.grid_columnconfigure(c, weight=1)
 
         # settings / quit
-        bottom = tk.Frame(r, padx=16)
+        bottom = tk.Frame(tab, padx=16)
         bottom._role = "bg"
         bottom.grid(row=4, column=0, sticky="ew")
         self._button(bottom, "Settings", self.open_settings, "btn").grid(row=0, column=0, sticky="ew", padx=(0, 8))
@@ -604,8 +683,92 @@ class App:
         bottom.grid_columnconfigure(1, weight=1)
 
         # footer
-        self._label(r, "Macro: %s    Config: %s" % (os.path.basename(MACRO_FILE), os.path.basename(CONFIG_FILE)),
+        self._label(tab, "Macro: %s    Config: %s" % (os.path.basename(MACRO_FILE), os.path.basename(CONFIG_FILE)),
                     ("Segoe UI", 8), "bg_muted").grid(row=5, column=0, pady=(8, 10))
+
+    def _build_auto_tab(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+
+        # status
+        status = tk.Frame(tab, padx=16, pady=12)
+        status._role = "bg"
+        status.grid(row=0, column=0, sticky="ew")
+        self.auto_status_label = self._label(status, "", ("Segoe UI", 20, "bold"), "status")
+        self.auto_status_label.pack(anchor="w")
+        self._label(status, "auto clicker", ("Segoe UI", 10), "bg_muted").pack(anchor="w", pady=(6, 0))
+
+        # start / stop
+        btns = tk.Frame(tab, padx=16)
+        btns._role = "bg"
+        btns.grid(row=1, column=0, sticky="ew")
+        self.click_btn = self._button(btns, "Start Clicking  (%s)" % hotkey_display(self.rec.hotkeys["autoclick"]), self.rec.toggle_autoclick, "btn_green")
+        self.click_btn.grid(row=0, column=0, sticky="ew")
+        btns.grid_columnconfigure(0, weight=1)
+
+        # controls
+        panel = tk.Frame(tab, padx=16, pady=12)
+        panel._role = "panel"
+        panel.grid(row=2, column=0, sticky="ew", padx=16, pady=12)
+
+        row1 = tk.Frame(panel)
+        row1._role = "panel"
+        row1.pack(fill="x", pady=4)
+        self._label(row1, "Clicks per second", ("Segoe UI", 10), "panel_fg").pack(side="left", padx=(0, 12))
+        self.cps_var = tk.IntVar(value=self.rec.cps)
+        scale = tk.Scale(row1, from_=1, to=100, orient="horizontal",
+                         variable=self.cps_var, showvalue=True,
+                         command=lambda v: self.rec.set_cps(v))
+        scale._role = "scale"
+        scale.pack(side="left", fill="x", expand=True)
+
+        row2 = tk.Frame(panel)
+        row2._role = "panel"
+        row2.pack(fill="x", pady=4)
+        self._label(row2, "Mouse button", ("Segoe UI", 10), "panel_fg").pack(side="left", padx=(0, 12))
+        self.click_btn_var = tk.StringVar(value=self.rec.click_button)
+        menu = tk.OptionMenu(row2, self.click_btn_var, "left", "middle", "right",
+                             command=self._click_button_changed)
+        menu._role = "menu"
+        menu.pack(side="left")
+        self._label(row2, "left", ("Segoe UI", 8), "panel_muted").pack(side="left", padx=8)
+
+        row3 = tk.Frame(panel)
+        row3._role = "panel"
+        row3.pack(fill="x", pady=4)
+        self._label(row3, "Mode", ("Segoe UI", 10), "panel_fg").pack(side="left", padx=(0, 12))
+        self.click_mode_var = tk.StringVar(value="click")
+        self._label(row3, "Click (press+release)  /  ", ("Segoe UI", 9), "panel_muted").pack(side="left")
+        rb = tk.Radiobutton(row3, text="Hold (press until stopped)", value="hold",
+                            variable=self.click_mode_var,
+                            command=self._click_mode_changed)
+        rb._role = "radio"
+        rb.pack(side="left")
+
+        hint = self._label(tab, "Toggle with %s, or click Start. Hotkeys are editable in Settings."
+                           % hotkey_display(self.rec.hotkeys["autoclick"]),
+                           ("Segoe UI", 8), "bg_muted")
+        hint.grid(row=3, column=0, pady=(0, 10))
+        self.auto_hint = hint
+        self.auto_message_label = self._label(tab, "", ("Segoe UI", 10), "bg_muted")
+        self.auto_message_label.grid(row=4, column=0, pady=(0, 6))
+
+    def show_tab(self, name):
+        if name == "auto":
+            self.macro_tab.grid_remove()
+            self.auto_tab.grid()
+        else:
+            self.auto_tab.grid_remove()
+            self.macro_tab.grid()
+        if getattr(self, "tab_macro", None) is not None:
+            self.tab_macro._role = "tab_sel" if name == "macro" else "tab"
+            self.tab_auto._role = "tab_sel" if name == "auto" else "tab"
+            self.apply_theme()
+
+    def _click_button_changed(self, value):
+        self.rec.click_button = value
+
+    def _click_mode_changed(self):
+        self.rec.click_hold = (self.click_mode_var.get() == "hold")
 
     def _stat(self, parent, col, title, var):
         box = tk.Frame(parent, padx=10, pady=8)
@@ -684,6 +847,18 @@ class App:
                 w.configure(bg=t["panel"], fg=t["fg"], selectcolor=t["btn"],
                             activebackground=t["panel"], activeforeground=t["fg"],
                             highlightthickness=0)
+            elif role == "tab":
+                w.configure(bg=t["btn"], fg=t["fg"],
+                            activebackground=t["btn"], activeforeground=t["fg"],
+                            highlightthickness=1, highlightbackground=t["border"])
+            elif role == "tab_sel":
+                w.configure(bg=t["panel"], fg=t["fg"],
+                            activebackground=t["panel"], activeforeground=t["fg"],
+                            highlightthickness=1, highlightbackground=ACCENT)
+            elif role == "scale":
+                w.configure(bg=t["panel"], fg=t["fg"], troughcolor=t["bg"],
+                            activebackground=t["fg"],
+                            highlightthickness=1, highlightbackground=t["border"])
             elif role == "menu":
                 w.configure(bg=t["btn"], fg=t["fg"],
                             activebackground=t["btn"], activeforeground=t["fg"],
@@ -732,6 +907,11 @@ class App:
         self.record_btn.config(text="Record  (%s)" % hotkey_display(self.rec.hotkeys["record"]))
         self.play_btn.config(text="Play  (%s)" % hotkey_display(self.rec.hotkeys["play"]))
         self.quit_btn.config(text="Quit  (%s)" % hotkey_display(self.rec.hotkeys["quit"]))
+        if not self.rec.clicking:
+            self.click_btn.config(text="Start Clicking  (%s)" % hotkey_display(self.rec.hotkeys["autoclick"]))
+        if getattr(self, "auto_hint", None) is not None:
+            self.auto_hint.config(text="Toggle with %s, or click Start. Hotkeys are editable in Settings."
+                                  % hotkey_display(self.rec.hotkeys["autoclick"]))
 
     def choose_theme(self, name):
         self.theme = name
@@ -869,7 +1049,8 @@ class App:
         hk_frame._role = "bg"
         hk_frame.pack(fill="x", padx=14)
         self.hk_buttons = {}
-        for role, label in (("record", "Record"), ("play", "Play"), ("quit", "Quit")):
+        for role, label in (("record", "Record"), ("play", "Play"),
+                            ("quit", "Quit"), ("autoclick", "Auto Click")):
             row = tk.Frame(hk_frame)
             row._role = "bg"
             row.pack(fill="x", pady=2)
@@ -950,6 +1131,14 @@ class App:
         self.loops_var.set(str(rec.loops))
         pos = rec.start_pos
         self.pos_var.set("(%d, %d)" % tuple(pos) if pos else "-")
+        if rec.clicking:
+            self.auto_status_label.config(text="CLICKING", fg=GREEN)
+            self.click_btn.config(text="Stop Clicking")
+        else:
+            self.auto_status_label.config(text="IDLE", fg=YELLOW)
+            self.click_btn.config(text="Start Clicking  (%s)" % hotkey_display(rec.hotkeys["autoclick"]))
+        if getattr(self, "auto_message_label", None) is not None:
+            self.auto_message_label.config(text=rec.message)
         self.root.after(100, self.poll)
 
 

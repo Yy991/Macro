@@ -7,14 +7,21 @@
 
 ## What it does
 
-A mouse & keyboard macro recorder with a themeable GUI.
+A mouse & keyboard macro recorder with a themeable GUI, in two tabs:
 
+**Macro tab**
 - Records mouse clicks, mouse movement, and keyboard input.
 - Plays the macro back on a **loop** until you stop it.
 - Captures where the mouse was when recording started, and returns the cursor
   there at the start of every loop.
-- Dark-themed GUI with themes: dark, light, galaxy, miku, and a fully custom
-  theme editor (HSV color wheel + per-role colors).
+
+**Auto Clicker tab**
+- Auto-clicks at a set rate (1–100 clicks per second).
+- Pick left / middle / right button, or **Hold** mode (presses and holds).
+- Toggle with the hotkey (default `F6`).
+
+The whole app uses a dark-themed GUI with themes: dark, light, galaxy, miku,
+and a fully custom theme editor (HSV color wheel + per-role colors).
 
 ## Controls / hotkeys
 
@@ -22,6 +29,7 @@ A mouse & keyboard macro recorder with a themeable GUI.
 |-----|--------|
 | `F8` | Toggle recording |
 | `F9` | Toggle looping playback |
+| `F6` | Toggle auto clicker |
 | `ESC` | Quit |
 
 The hotkeys are **editable** — open **Settings → HOTKEYS**, click a key button,
