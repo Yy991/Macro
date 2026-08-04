@@ -800,6 +800,12 @@ class App:
             img = img.subsample(scale, scale)
         return img
 
+    def _load_raw_image(self, path):
+        try:
+            return tk.PhotoImage(file=path)
+        except Exception:
+            return None
+
     def _tile_image(self, src, w, h):
         t = tk.PhotoImage(width=max(1, w), height=max(1, h))
         sw, sh = src.width(), src.height()
@@ -807,6 +813,47 @@ class App:
             for x in range(0, w, sw):
                 t.tk.call(t, "copy", src, "-from", 0, 0, sw, sh, "-to", x, y)
         return t
+
+    def _apply_bg_tiles(self):
+        if self.theme == "minecraft":
+            try:
+                self.root.update_idletasks()
+                src = self._load_raw_image(resource_path("dirt_block.png"))
+                if src is None:
+                    return
+
+                def collect(w):
+                    frames = []
+                    for c in w.winfo_children():
+                        if isinstance(c, tk.Frame) and getattr(c, "_role", None) == "bg":
+                            frames.append(c)
+                        frames.extend(collect(c))
+                    return frames
+
+                for f in collect(self.root):
+                    w, h = f.winfo_width(), f.winfo_height()
+                    if w <= 1 or h <= 1:
+                        continue
+                    img = self._tile_image(src, w, h)
+                    lbl = getattr(f, "_bg_tile", None)
+                    if lbl is None:
+                        lbl = tk.Label(f)
+                        lbl._role = "bg"
+                        f._bg_tile = lbl
+                    lbl.configure(image=img)
+                    lbl.place(x=0, y=0, relwidth=1, relheight=1)
+                    lbl.lower()
+                    f._bg_tile_img = img
+            except Exception:
+                pass
+        else:
+            def cleanup(w):
+                for c in w.winfo_children():
+                    tile = getattr(c, "_bg_tile", None)
+                    if tile is not None:
+                        tile.place_forget()
+                    cleanup(c)
+            cleanup(self.root)
 
     def _make_theme_image(self, parent, filename, max_w):
         if not filename:
@@ -920,7 +967,7 @@ class App:
                     self.root.update_idletasks()
                     w = self.header.winfo_reqwidth()
                     h = self.header.winfo_reqheight()
-                    src = self._load_theme_image(resource_path("dirt_block.png"))
+                    src = self._load_raw_image(resource_path("dirt_block.png"))
                     if src is not None:
                         self._tile_img = self._tile_image(src, w, h)
                         self.header_tile.configure(image=self._tile_img)
@@ -930,6 +977,7 @@ class App:
                     pass
             else:
                 self.header_tile.place_forget()
+        self._apply_bg_tiles()
         if save:
             self.save_config()
 

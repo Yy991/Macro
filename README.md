@@ -21,8 +21,8 @@ A mouse & keyboard macro recorder with a themeable GUI, in two tabs:
 - Toggle with the hotkey (default `F6`).
 
 The whole app uses a dark-themed GUI with themes: dark, light, galaxy, miku,
-**minecraft** (the header turns into a tiled Minecraft dirt block), and a fully
-custom theme editor (HSV color wheel + per-role colors).
+**minecraft** (the entire UI background becomes your `11635.jpg` dirt texture),
+and a fully custom theme editor (HSV color wheel + per-role colors).
 
 ## Controls / hotkeys
 
